@@ -54,5 +54,10 @@ service cloud.firestore {
       allow read: if request.auth != null && request.auth.uid == userId;
       allow write: if false;
     }
+
+    // Admin invites: server-only (Firebase Admin SDK), used for invite links
+    match /adminInvites/{docId} {
+      allow read, write: if false;
+    }
   }
 }

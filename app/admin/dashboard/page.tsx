@@ -10,9 +10,10 @@ import VolunteerTestimonialsManager from "@/components/admin/VolunteerTestimonia
 import BoardOfDirectorsManager from "@/components/admin/BoardOfDirectorsManager";
 import ComingSoonCardsManager from "@/components/admin/ComingSoonCardsManager";
 import ContactMessagesManager from "@/components/admin/ContactMessagesManager";
-import { Mail, Users, Briefcase, LogOut, UsersRound, BookOpen, MessageSquareQuote, MessageCircle } from "lucide-react";
+import AdminUsersManager from "@/components/admin/AdminUsersManager";
+import { Mail, Users, Briefcase, LogOut, UsersRound, BookOpen, MessageSquareQuote, MessageCircle, Shield } from "lucide-react";
 
-type Tab = "newsletter" | "applications" | "positions" | "testimonials" | "board" | "comingSoon" | "contactMessages";
+type Tab = "newsletter" | "applications" | "positions" | "testimonials" | "board" | "comingSoon" | "contactMessages" | "adminUsers";
 
 export default function AdminDashboardPage() {
   const { user, isAdmin, loading, logout } = useAdminAuth();
@@ -54,6 +55,7 @@ export default function AdminDashboardPage() {
     { id: "testimonials", label: "Volunteer Testimonials", icon: <MessageSquareQuote size={18} /> },
     { id: "board", label: "Board of Directors", icon: <UsersRound size={18} /> },
     { id: "comingSoon", label: "Coming Soon Cards", icon: <BookOpen size={18} /> },
+    { id: "adminUsers", label: "Admin Users", icon: <Shield size={18} /> },
   ];
 
   return (
@@ -94,6 +96,7 @@ export default function AdminDashboardPage() {
         {activeTab === "testimonials" && <VolunteerTestimonialsManager />}
         {activeTab === "board" && <BoardOfDirectorsManager />}
         {activeTab === "comingSoon" && <ComingSoonCardsManager />}
+        {activeTab === "adminUsers" && <AdminUsersManager />}
       </div>
     </div>
   );
