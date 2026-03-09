@@ -2,7 +2,7 @@ import React from 'react';
 
 const DonateForm = () => {
   return (
-    <section className="py-16 md:py-24">
+    <section id="donate-form" className="py-16 md:py-24">
       <div className="container mx-auto px-4">
         <div style={{position:'relative', overflow:'hidden', height:1200, width:'100%'}}>
           <iframe 
