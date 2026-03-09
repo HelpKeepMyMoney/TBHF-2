@@ -79,7 +79,25 @@ pnpm dev
 
 ## Admin Dashboard
 
-Access the admin dashboard at `/admin` to manage newsletter subscribers, volunteer applications, and volunteer positions. You must be logged in with an account that has a document in the Firestore `admins` collection (document ID = your user UID).
+Access the admin dashboard at `/admin` to manage newsletter subscribers, volunteer applications, volunteer positions, contact messages, board of directors, and more. You must be logged in with an account that has a document in the Firestore `admins` collection (document ID = your user UID).
+
+### Volunteer Management System
+
+The admin panel includes a full volunteer management system:
+
+- **Volunteer Positions** – Create, edit, and manage volunteer opportunity cards. Positions can be saved as drafts (not visible on the public site) or published.
+- **LinkedIn Job Descriptions** – When creating a position, optionally generate an AI-powered LinkedIn-style job description. Edit the draft, save it, then copy to clipboard (with application form link) for manual posting to LinkedIn.
+- **Volunteer Applications** – View applications with full recruitment tracking: resume uploads, interview scheduling, onboarding status, and extended workflow (pending → reviewed → interview_scheduled → interviewed → offered → onboarded → closed).
+- **Position Selection** – The public volunteer form lets applicants choose a specific position from a dropdown; positions can be pre-selected via URL (`/volunteer?position={id}#apply`).
+
+**Environment variables for volunteer features:**
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `ANTHROPIC_API_KEY` | For AI job descriptions | Get from [Anthropic Console](https://console.anthropic.com/) |
+| `VOLUNTEER_FORM_URL` | Optional | Override the application URL in generated job descriptions (default: uses `NEXT_PUBLIC_VERCEL_URL` or production URL) |
+
+**Resume uploads** require Firebase Storage to be enabled and the service account to have Storage Admin permissions. The storage bucket is configured via `NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET`.
 
 ## Building for Production
 
