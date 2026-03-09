@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   collection,
   getDocs,
@@ -11,6 +11,8 @@ import {
   orderBy,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import { useAdminAuth } from "@/context/AdminAuthContext";
+import { logAdminAction } from "@/lib/adminLog";
 
 interface ContactMessage {
   id: string;
@@ -26,6 +28,7 @@ interface ContactMessage {
 const STATUS_OPTIONS = ["pending", "reviewed", "contacted", "closed"];
 
 export default function ContactMessagesManager() {
+  const { user } = useAdminAuth();
   const [messages, setMessages] = useState<ContactMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -33,8 +36,9 @@ export default function ContactMessagesManager() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [formState, setFormState] = useState<Partial<ContactMessage>>({});
+  const [error, setError] = useState<string | null>(null);
 
-  const fetchMessages = async () => {
+  const fetchMessages = useCallback(async () => {
     setLoading(true);
     if (!db) {
       setLoading(false);
@@ -51,26 +55,57 @@ export default function ContactMessagesManager() {
         ...docSnap.data(),
       })) as ContactMessage[];
       setMessages(data);
+      setError(null);
     } catch (err) {
       console.error(err);
+      setError("Failed to load messages. Please try again.");
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     fetchMessages();
-  }, []);
+  }, [fetchMessages]);
+
+  // Clear selected when selected message is filtered out
+  useEffect(() => {
+    if (selectedId && statusFilter !== "all") {
+      const selectedMsg = messages.find((m) => m.id === selectedId);
+      if (selectedMsg && selectedMsg.status !== statusFilter) {
+        setSelectedId(null);
+      }
+    }
+  }, [statusFilter, messages, selectedId]);
+
+  // Clear editing when selecting a different message
+  useEffect(() => {
+    if (selectedId && editingId && selectedId !== editingId) {
+      setEditingId(null);
+    }
+  }, [selectedId, editingId]);
 
   const handleStatusChange = async (id: string, status: string) => {
     if (!db) return;
+    setError(null);
     try {
       await updateDoc(doc(db, "contactMessages", id), { status });
       setMessages((prev) =>
         prev.map((m) => (m.id === id ? { ...m, status } : m))
       );
+      if (user) {
+        await logAdminAction({
+          action: "update",
+          resource: "contactMessages",
+          resourceId: id,
+          details: `status → ${status}`,
+          adminUid: user.uid,
+          adminEmail: user.email ?? "",
+        });
+      }
     } catch (err) {
       console.error(err);
+      setError("Failed to update status. Please try again.");
     }
   };
 
@@ -89,7 +124,9 @@ export default function ContactMessagesManager() {
 
   const handleSave = async () => {
     if (!editingId || !db) return;
+    if (!formState.name || !formState.email) return;
     setSaving(true);
+    setError(null);
     try {
       const payload = {
         name: formState.name,
@@ -104,8 +141,18 @@ export default function ContactMessagesManager() {
         prev.map((m) => (m.id === editingId ? { ...m, ...payload } : m))
       );
       setEditingId(null);
+      if (user) {
+        await logAdminAction({
+          action: "update",
+          resource: "contactMessages",
+          resourceId: editingId,
+          adminUid: user.uid,
+          adminEmail: user.email ?? "",
+        });
+      }
     } catch (err) {
       console.error(err);
+      setError("Failed to save changes. Please try again.");
     } finally {
       setSaving(false);
     }
@@ -114,13 +161,24 @@ export default function ContactMessagesManager() {
   const handleDelete = async (id: string) => {
     if (!confirm("Delete this message? This cannot be undone.")) return;
     if (!db) return;
+    setError(null);
     try {
       await deleteDoc(doc(db, "contactMessages", id));
       setMessages((prev) => prev.filter((m) => m.id !== id));
       if (selectedId === id) setSelectedId(null);
       if (editingId === id) setEditingId(null);
+      if (user) {
+        await logAdminAction({
+          action: "delete",
+          resource: "contactMessages",
+          resourceId: id,
+          adminUid: user.uid,
+          adminEmail: user.email ?? "",
+        });
+      }
     } catch (err) {
       console.error(err);
+      setError("Failed to delete message. Please try again.");
     }
   };
 
@@ -136,6 +194,22 @@ export default function ContactMessagesManager() {
       <h2 className="font-neue-kabel font-bold text-xl mb-4">
         Contact Messages
       </h2>
+
+      {error && (
+        <div
+          role="alert"
+          className="mb-4 px-4 py-3 bg-red-50 border border-red-200 rounded-md flex items-center justify-between gap-4"
+        >
+          <p className="text-red-700 font-helvetica text-sm">{error}</p>
+          <button
+            onClick={() => setError(null)}
+            className="text-red-600 hover:text-red-800 font-bold text-sm shrink-0"
+            aria-label="Dismiss error"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
 
       <div className="flex flex-wrap gap-4 mb-6">
         <select
@@ -174,7 +248,10 @@ export default function ContactMessagesManager() {
                     className={`border-b border-gray-100 cursor-pointer ${
                       selectedId === m.id ? "bg-gray-50" : "hover:bg-gray-50"
                     }`}
-                    onClick={() => setSelectedId(m.id)}
+                    onClick={() => {
+                      setSelectedId(m.id);
+                      if (editingId && editingId !== m.id) setEditingId(null);
+                    }}
                   >
                     <td className="py-3 font-helvetica">{m.name}</td>
                     <td className="py-3 font-helvetica text-sm max-w-[120px] truncate">

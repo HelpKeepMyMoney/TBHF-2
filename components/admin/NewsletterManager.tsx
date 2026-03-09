@@ -10,6 +10,8 @@ import {
   orderBy,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import { useAdminAuth } from "@/context/AdminAuthContext";
+import { logAdminAction } from "@/lib/adminLog";
 
 interface NewsletterSubscriber {
   id: string;
@@ -19,6 +21,7 @@ interface NewsletterSubscriber {
 }
 
 export default function NewsletterManager() {
+  const { user } = useAdminAuth();
   const [subscribers, setSubscribers] = useState<NewsletterSubscriber[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -61,6 +64,15 @@ export default function NewsletterManager() {
     try {
       await deleteDoc(doc(db, "newsletter", id));
       setSubscribers((prev) => prev.filter((s) => s.id !== id));
+      if (user) {
+        await logAdminAction({
+          action: "delete",
+          resource: "newsletter",
+          resourceId: id,
+          adminUid: user.uid,
+          adminEmail: user.email ?? "",
+        });
+      }
     } catch (err) {
       console.error(err);
     } finally {

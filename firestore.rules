@@ -59,5 +59,11 @@ service cloud.firestore {
     match /adminInvites/{docId} {
       allow read, write: if false;
     }
+
+    // Admin activity log: admins can read and create
+    match /adminLogs/{docId} {
+      allow read, create: if request.auth != null && isAdmin();
+      allow update, delete: if false;
+    }
   }
 }

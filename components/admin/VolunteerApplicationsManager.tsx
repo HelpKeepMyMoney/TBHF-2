@@ -11,6 +11,8 @@ import {
   orderBy,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import { useAdminAuth } from "@/context/AdminAuthContext";
+import { logAdminAction } from "@/lib/adminLog";
 
 interface VolunteerApplication {
   id: string;
@@ -31,6 +33,7 @@ interface VolunteerApplication {
 const STATUS_OPTIONS = ["pending", "reviewed", "contacted", "closed"];
 
 export default function VolunteerApplicationsManager() {
+  const { user } = useAdminAuth();
   const [applications, setApplications] = useState<VolunteerApplication[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -74,6 +77,16 @@ export default function VolunteerApplicationsManager() {
       setApplications((prev) =>
         prev.map((a) => (a.id === id ? { ...a, status } : a))
       );
+      if (user) {
+        await logAdminAction({
+          action: "update",
+          resource: "volunteerApplications",
+          resourceId: id,
+          details: `status → ${status}`,
+          adminUid: user.uid,
+          adminEmail: user.email ?? "",
+        });
+      }
     } catch (err) {
       console.error(err);
     }
@@ -119,6 +132,15 @@ export default function VolunteerApplicationsManager() {
         prev.map((a) => (a.id === editingId ? { ...a, ...payload } : a))
       );
       setEditingId(null);
+      if (user) {
+        await logAdminAction({
+          action: "update",
+          resource: "volunteerApplications",
+          resourceId: editingId,
+          adminUid: user.uid,
+          adminEmail: user.email ?? "",
+        });
+      }
     } catch (err) {
       console.error(err);
     } finally {
@@ -134,6 +156,15 @@ export default function VolunteerApplicationsManager() {
       setApplications((prev) => prev.filter((a) => a.id !== id));
       if (selectedId === id) setSelectedId(null);
       if (editingId === id) setEditingId(null);
+      if (user) {
+        await logAdminAction({
+          action: "delete",
+          resource: "volunteerApplications",
+          resourceId: id,
+          adminUid: user.uid,
+          adminEmail: user.email ?? "",
+        });
+      }
     } catch (err) {
       console.error(err);
     }

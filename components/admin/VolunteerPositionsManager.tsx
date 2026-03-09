@@ -12,12 +12,15 @@ import {
   orderBy,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import { useAdminAuth } from "@/context/AdminAuthContext";
+import { logAdminAction } from "@/lib/adminLog";
 import { DEFAULT_VOLUNTEER_POSITIONS } from "@/lib/volunteer-positions";
 import type { VolunteerPosition } from "@/components/volunteer/VolunteerOpportunities";
 
 const CATEGORIES = ["research", "outreach", "education", "digital", "events", "tech"];
 
 export default function VolunteerPositionsManager() {
+  const { user } = useAdminAuth();
   const [positions, setPositions] = useState<(VolunteerPosition & { id: string })[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -67,10 +70,20 @@ export default function VolunteerPositionsManager() {
     try {
       for (let i = 0; i < DEFAULT_VOLUNTEER_POSITIONS.length; i++) {
         const p = DEFAULT_VOLUNTEER_POSITIONS[i];
-        await addDoc(collection(db, "volunteerPositions"), {
+        const docRef = await addDoc(collection(db, "volunteerPositions"), {
           ...p,
           order: p.order ?? i,
         });
+        if (user) {
+          await logAdminAction({
+            action: "create",
+            resource: "volunteerPositions",
+            resourceId: docRef.id,
+            details: `seed: ${p.title}`,
+            adminUid: user.uid,
+            adminEmail: user.email ?? "",
+          });
+        }
       }
       await fetchPositions();
     } catch (err) {
@@ -98,6 +111,15 @@ export default function VolunteerPositionsManager() {
             p.id === editingId ? { ...p, ...formState } : p
           )
         );
+        if (user) {
+          await logAdminAction({
+            action: "update",
+            resource: "volunteerPositions",
+            resourceId: editingId,
+            adminUid: user.uid,
+            adminEmail: user.email ?? "",
+          });
+        }
       } else {
         const docRef = await addDoc(collection(db, "volunteerPositions"), {
           title: formState.title,
@@ -111,6 +133,15 @@ export default function VolunteerPositionsManager() {
           ...prev,
           { id: docRef.id, ...formState } as VolunteerPosition & { id: string },
         ]);
+        if (user) {
+          await logAdminAction({
+            action: "create",
+            resource: "volunteerPositions",
+            resourceId: docRef.id,
+            adminUid: user.uid,
+            adminEmail: user.email ?? "",
+          });
+        }
       }
       setEditingId(null);
       setShowForm(false);
@@ -139,6 +170,15 @@ export default function VolunteerPositionsManager() {
       if (editingId === id) {
         setEditingId(null);
         setShowForm(false);
+      }
+      if (user) {
+        await logAdminAction({
+          action: "delete",
+          resource: "volunteerPositions",
+          resourceId: id,
+          adminUid: user.uid,
+          adminEmail: user.email ?? "",
+        });
       }
     } catch (err) {
       console.error(err);

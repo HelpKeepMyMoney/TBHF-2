@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { randomBytes } from "crypto";
 import { Resend } from "resend";
 import { getAdminDb, getAdminAuth } from "@/lib/firebase-admin";
+import { logAdminActionServer } from "@/lib/adminLog-server";
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
@@ -57,7 +58,38 @@ export async function GET(request: Request) {
       }
     }
 
-    return NextResponse.json({ users });
+    const invitesSnapshot = await db.collection("adminInvites").orderBy("createdAt", "desc").get();
+    const invites: {
+      id: string;
+      email: string;
+      dateEmailed: string;
+      dateAccepted: string | null;
+      dateRevoked: string | null;
+      acceptedUid: string | null;
+    }[] = [];
+    const now = new Date();
+    for (const doc of invitesSnapshot.docs) {
+      const d = doc.data();
+      const email = (d.email as string) ?? "";
+      const createdAt = d.createdAt?.toDate?.() ?? d.createdAt;
+      const acceptedAt = d.acceptedAt?.toDate?.() ?? d.acceptedAt;
+      const revokedAt = d.revokedAt?.toDate?.() ?? d.revokedAt;
+      const acceptedUid = (d.acceptedUid as string) ?? null;
+      const expiresAt = d.expiresAt?.toDate?.() ?? d.expiresAt;
+      if (!email) continue;
+      const isExpired = expiresAt && new Date(expiresAt) < now && !acceptedAt && !revokedAt;
+      if (isExpired) continue;
+      invites.push({
+        id: doc.id,
+        email,
+        dateEmailed: createdAt ? new Date(createdAt).toISOString() : "",
+        dateAccepted: acceptedAt ? new Date(acceptedAt).toISOString() : null,
+        dateRevoked: revokedAt ? new Date(revokedAt).toISOString() : null,
+        acceptedUid,
+      });
+    }
+
+    return NextResponse.json({ users, invites });
   } catch (err) {
     console.error(err);
     return NextResponse.json({ error: "Failed to list admins" }, { status: 500 });
@@ -74,20 +106,51 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Server not configured" }, { status: 503 });
   }
 
-  const apiKey = process.env.RESEND_API_KEY;
-  if (!apiKey || !apiKey.startsWith("re_")) {
-    return NextResponse.json(
-      { error: "Email service is not configured for admin invites" },
-      { status: 503 }
-    );
-  }
-
   try {
     const body = await request.json();
     const email = typeof body?.email === "string" ? body.email.trim().toLowerCase() : "";
+    const recordAsRevoked = body?.recordAsRevoked === true;
 
     if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       return NextResponse.json({ error: "Valid email is required" }, { status: 400 });
+    }
+
+    if (recordAsRevoked) {
+      const existingInvite = await db
+        .collection("adminInvites")
+        .where("email", "==", email)
+        .limit(1)
+        .get();
+      if (!existingInvite.empty) {
+        return NextResponse.json(
+          { error: "This email is already in the invitations list." },
+          { status: 400 }
+        );
+      }
+      const now = new Date();
+      const inviteRef = await db.collection("adminInvites").add({
+        email,
+        createdAt: now,
+        revokedAt: now,
+      });
+      const actor = await auth.getUser(verified.uid).catch(() => null);
+      await logAdminActionServer({
+        action: "create",
+        resource: "adminInvites",
+        resourceId: inviteRef.id,
+        details: `record as revoked: ${email}`,
+        adminUid: verified.uid,
+        adminEmail: actor?.email ?? "",
+      });
+      return NextResponse.json({ success: true, recordedAsRevoked: true });
+    }
+
+    const apiKey = process.env.RESEND_API_KEY;
+    if (!apiKey || !apiKey.startsWith("re_")) {
+      return NextResponse.json(
+        { error: "Email service is not configured for admin invites" },
+        { status: 503 }
+      );
     }
 
     const existingUser = await auth.getUserByEmail(email).catch(() => null);
@@ -105,6 +168,15 @@ export async function POST(request: Request) {
       const fromEmail =
         process.env.RESEND_FROM_EMAIL ||
         "The Black History Foundation <onboarding@resend.dev>";
+      const actor = await auth.getUser(verified.uid).catch(() => null);
+      await logAdminActionServer({
+        action: "create",
+        resource: "adminUsers",
+        resourceId: existingUser.uid,
+        details: `added existing user: ${email}`,
+        adminUid: verified.uid,
+        adminEmail: actor?.email ?? "",
+      });
       await resend.emails.send({
         from: fromEmail,
         to: email,
@@ -139,11 +211,21 @@ export async function POST(request: Request) {
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + 7);
 
-    await db.collection("adminInvites").add({
+    const inviteRef = await db.collection("adminInvites").add({
       email,
       token,
       createdAt: new Date(),
       expiresAt,
+    });
+
+    const actor = await auth.getUser(verified.uid).catch(() => null);
+    await logAdminActionServer({
+      action: "create",
+      resource: "adminInvites",
+      resourceId: inviteRef.id,
+      details: `invite sent: ${email}`,
+      adminUid: verified.uid,
+      adminEmail: actor?.email ?? "",
     });
 
     const baseUrl =
@@ -235,6 +317,15 @@ export async function PATCH(request: Request) {
     if (email) {
       await db.collection("admins").doc(uid).update({ email });
     }
+    const actor = await auth.getUser(verified.uid).catch(() => null);
+    await logAdminActionServer({
+      action: "update",
+      resource: "adminUsers",
+      resourceId: uid,
+      details: email ? `email updated` : `password updated`,
+      adminUid: verified.uid,
+      adminEmail: actor?.email ?? "",
+    });
     return NextResponse.json({ success: true });
   } catch (err) {
     console.error(err);
@@ -256,9 +347,27 @@ export async function DELETE(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
     const uid = searchParams.get("uid");
+    const inviteId = searchParams.get("inviteId");
+
+    if (inviteId) {
+      const inviteRef = db.collection("adminInvites").doc(inviteId);
+      const inviteDoc = await inviteRef.get();
+      if (!inviteDoc.exists) {
+        return NextResponse.json({ error: "Invite not found" }, { status: 404 });
+      }
+      const data = inviteDoc.data();
+      if (data?.acceptedAt) {
+        return NextResponse.json({ error: "Cannot revoke an accepted invite" }, { status: 400 });
+      }
+      if (data?.revokedAt) {
+        return NextResponse.json({ error: "Invite was already revoked" }, { status: 400 });
+      }
+      await inviteRef.update({ revokedAt: new Date() });
+      return NextResponse.json({ success: true });
+    }
 
     if (!uid) {
-      return NextResponse.json({ error: "Admin uid is required" }, { status: 400 });
+      return NextResponse.json({ error: "Admin uid or inviteId is required" }, { status: 400 });
     }
 
     if (uid === verified.uid) {
@@ -270,8 +379,18 @@ export async function DELETE(request: Request) {
       return NextResponse.json({ error: "Admin not found" }, { status: 404 });
     }
 
+    const deletedEmail = (await auth.getUser(uid).catch(() => null))?.email ?? "";
     await db.collection("admins").doc(uid).delete();
     await auth.deleteUser(uid);
+    const actor = await auth.getUser(verified.uid).catch(() => null);
+    await logAdminActionServer({
+      action: "delete",
+      resource: "adminUsers",
+      resourceId: uid,
+      details: `removed admin: ${deletedEmail}`,
+      adminUid: verified.uid,
+      adminEmail: actor?.email ?? "",
+    });
     return NextResponse.json({ success: true });
   } catch (err) {
     console.error(err);

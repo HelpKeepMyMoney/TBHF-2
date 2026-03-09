@@ -12,6 +12,8 @@ import {
   orderBy,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import { useAdminAuth } from "@/context/AdminAuthContext";
+import { logAdminAction } from "@/lib/adminLog";
 import {
   DEFAULT_COMING_SOON_CARDS,
   type ComingSoonCard,
@@ -27,6 +29,7 @@ const ICON_OPTIONS: { value: ComingSoonCardIcon; label: string }[] = [
 ];
 
 export default function ComingSoonCardsManager() {
+  const { user } = useAdminAuth();
   const [cards, setCards] = useState<(ComingSoonCard & { id: string })[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -80,11 +83,21 @@ export default function ComingSoonCardsManager() {
     try {
       for (let i = 0; i < DEFAULT_COMING_SOON_CARDS.length; i++) {
         const c = DEFAULT_COMING_SOON_CARDS[i];
-        await addDoc(collection(db, "comingSoonCards"), {
+        const docRef = await addDoc(collection(db, "comingSoonCards"), {
           ...c,
           order: c.order ?? i,
           expectedTimeframe: c.expectedTimeframe ?? "Coming Soon",
         });
+        if (user) {
+          await logAdminAction({
+            action: "create",
+            resource: "comingSoonCards",
+            resourceId: docRef.id,
+            details: `seed: ${c.title}`,
+            adminUid: user.uid,
+            adminEmail: user.email ?? "",
+          });
+        }
       }
       await fetchCards();
     } catch (err) {
@@ -107,14 +120,32 @@ export default function ComingSoonCardsManager() {
           order: formState.order ?? 0,
           expectedTimeframe: formState.expectedTimeframe ?? "Coming Soon",
         });
+        if (user) {
+          await logAdminAction({
+            action: "update",
+            resource: "comingSoonCards",
+            resourceId: editingId,
+            adminUid: user.uid,
+            adminEmail: user.email ?? "",
+          });
+        }
       } else {
-        await addDoc(collection(db, "comingSoonCards"), {
+        const docRef = await addDoc(collection(db, "comingSoonCards"), {
           title: formState.title,
           description: formState.description,
           icon: formState.icon ?? "default",
           order: formState.order ?? cards.length,
           expectedTimeframe: formState.expectedTimeframe ?? "Coming Soon",
         });
+        if (user) {
+          await logAdminAction({
+            action: "create",
+            resource: "comingSoonCards",
+            resourceId: docRef.id,
+            adminUid: user.uid,
+            adminEmail: user.email ?? "",
+          });
+        }
       }
       setEditingId(null);
       setShowForm(false);
@@ -142,6 +173,15 @@ export default function ComingSoonCardsManager() {
       if (editingId === id) {
         setEditingId(null);
         setShowForm(false);
+      }
+      if (user) {
+        await logAdminAction({
+          action: "delete",
+          resource: "comingSoonCards",
+          resourceId: id,
+          adminUid: user.uid,
+          adminEmail: user.email ?? "",
+        });
       }
     } catch (err) {
       console.error(err);

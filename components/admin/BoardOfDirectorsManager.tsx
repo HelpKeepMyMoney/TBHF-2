@@ -12,12 +12,15 @@ import {
   orderBy,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import { useAdminAuth } from "@/context/AdminAuthContext";
+import { logAdminAction } from "@/lib/adminLog";
 import { DEFAULT_BOARD_MEMBERS } from "@/lib/board-of-directors";
 import type { BoardMember } from "@/lib/board-of-directors";
 
 type BoardMemberWithId = BoardMember & { id: string };
 
 export default function BoardOfDirectorsManager() {
+  const { user } = useAdminAuth();
   const [members, setMembers] = useState<BoardMemberWithId[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -66,10 +69,20 @@ export default function BoardOfDirectorsManager() {
     try {
       for (let i = 0; i < DEFAULT_BOARD_MEMBERS.length; i++) {
         const m = DEFAULT_BOARD_MEMBERS[i];
-        await addDoc(collection(db, "boardOfDirectors"), {
+        const docRef = await addDoc(collection(db, "boardOfDirectors"), {
           ...m,
           order: m.order ?? i,
         });
+        if (user) {
+          await logAdminAction({
+            action: "create",
+            resource: "boardOfDirectors",
+            resourceId: docRef.id,
+            details: `seed: ${m.name}`,
+            adminUid: user.uid,
+            adminEmail: user.email ?? "",
+          });
+        }
       }
       await fetchMembers();
     } catch (err) {
@@ -91,14 +104,32 @@ export default function BoardOfDirectorsManager() {
           image: formState.image ?? "",
           order: formState.order ?? 0,
         });
+        if (user) {
+          await logAdminAction({
+            action: "update",
+            resource: "boardOfDirectors",
+            resourceId: editingId,
+            adminUid: user.uid,
+            adminEmail: user.email ?? "",
+          });
+        }
       } else {
-        await addDoc(collection(db, "boardOfDirectors"), {
+        const docRef = await addDoc(collection(db, "boardOfDirectors"), {
           name: formState.name,
           role: formState.role,
           bio: formState.bio,
           image: formState.image ?? "",
           order: members.length,
         });
+        if (user) {
+          await logAdminAction({
+            action: "create",
+            resource: "boardOfDirectors",
+            resourceId: docRef.id,
+            adminUid: user.uid,
+            adminEmail: user.email ?? "",
+          });
+        }
       }
       setEditingId(null);
       setShowForm(false);
@@ -126,6 +157,15 @@ export default function BoardOfDirectorsManager() {
       if (editingId === id) {
         setEditingId(null);
         setShowForm(false);
+      }
+      if (user) {
+        await logAdminAction({
+          action: "delete",
+          resource: "boardOfDirectors",
+          resourceId: id,
+          adminUid: user.uid,
+          adminEmail: user.email ?? "",
+        });
       }
     } catch (err) {
       console.error(err);

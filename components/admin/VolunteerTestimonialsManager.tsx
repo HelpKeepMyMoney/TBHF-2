@@ -12,12 +12,15 @@ import {
   orderBy,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import { useAdminAuth } from "@/context/AdminAuthContext";
+import { logAdminAction } from "@/lib/adminLog";
 import { DEFAULT_VOLUNTEER_TESTIMONIALS } from "@/lib/volunteer-testimonials";
 import type { VolunteerTestimonial } from "@/lib/volunteer-testimonials";
 
 type TestimonialWithId = VolunteerTestimonial & { id: string };
 
 export default function VolunteerTestimonialsManager() {
+  const { user } = useAdminAuth();
   const [testimonials, setTestimonials] = useState<TestimonialWithId[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -67,10 +70,20 @@ export default function VolunteerTestimonialsManager() {
     try {
       for (let i = 0; i < DEFAULT_VOLUNTEER_TESTIMONIALS.length; i++) {
         const t = DEFAULT_VOLUNTEER_TESTIMONIALS[i];
-        await addDoc(collection(db, "volunteerTestimonials"), {
+        const docRef = await addDoc(collection(db, "volunteerTestimonials"), {
           ...t,
           order: t.order ?? i,
         });
+        if (user) {
+          await logAdminAction({
+            action: "create",
+            resource: "volunteerTestimonials",
+            resourceId: docRef.id,
+            details: `seed: ${t.name}`,
+            adminUid: user.uid,
+            adminEmail: user.email ?? "",
+          });
+        }
       }
       await fetchTestimonials();
     } catch (err) {
@@ -92,14 +105,32 @@ export default function VolunteerTestimonialsManager() {
           image: formState.image ?? "",
           order: formState.order ?? 0,
         });
+        if (user) {
+          await logAdminAction({
+            action: "update",
+            resource: "volunteerTestimonials",
+            resourceId: editingId,
+            adminUid: user.uid,
+            adminEmail: user.email ?? "",
+          });
+        }
       } else {
-        await addDoc(collection(db, "volunteerTestimonials"), {
+        const docRef = await addDoc(collection(db, "volunteerTestimonials"), {
           quote: formState.quote,
           name: formState.name,
           role: formState.role,
           image: formState.image ?? "",
           order: testimonials.length,
         });
+        if (user) {
+          await logAdminAction({
+            action: "create",
+            resource: "volunteerTestimonials",
+            resourceId: docRef.id,
+            adminUid: user.uid,
+            adminEmail: user.email ?? "",
+          });
+        }
       }
       setEditingId(null);
       setShowForm(false);
@@ -127,6 +158,15 @@ export default function VolunteerTestimonialsManager() {
       if (editingId === id) {
         setEditingId(null);
         setShowForm(false);
+      }
+      if (user) {
+        await logAdminAction({
+          action: "delete",
+          resource: "volunteerTestimonials",
+          resourceId: id,
+          adminUid: user.uid,
+          adminEmail: user.email ?? "",
+        });
       }
     } catch (err) {
       console.error(err);

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useAdminAuth } from "@/context/AdminAuthContext";
 import { ShieldPlus, Pencil, Trash2 } from "lucide-react";
 
@@ -9,9 +9,19 @@ interface AdminUser {
   email: string;
 }
 
+interface AdminInvite {
+  id: string;
+  email: string;
+  dateEmailed: string;
+  dateAccepted: string | null;
+  dateRevoked: string | null;
+  acceptedUid: string | null;
+}
+
 export default function AdminUsersManager() {
   const { user } = useAdminAuth();
   const [admins, setAdmins] = useState<AdminUser[]>([]);
+  const [invites, setInvites] = useState<AdminInvite[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
@@ -22,6 +32,8 @@ export default function AdminUsersManager() {
   const [editPassword, setEditPassword] = useState("");
   const [saving, setSaving] = useState(false);
   const [deletingUid, setDeletingUid] = useState<string | null>(null);
+  const [revokingInviteId, setRevokingInviteId] = useState<string | null>(null);
+  const editingRowRef = useRef<HTMLTableRowElement | null>(null);
 
   const getAuthHeaders = useCallback(async () => {
     const token = await user?.getIdToken();
@@ -43,6 +55,7 @@ export default function AdminUsersManager() {
       }
       const data = await res.json();
       setAdmins(data.users ?? []);
+      setInvites(data.invites ?? []);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load admins");
     } finally {
@@ -137,13 +150,49 @@ export default function AdminUsersManager() {
     }
   };
 
-  const startEdit = (a: AdminUser) => {
+  const handleRevokeInvite = async (inviteId: string) => {
+    if (!confirm("Revoke this invitation? They will no longer be able to use the invite link.")) return;
+    setRevokingInviteId(inviteId);
+    setError(null);
+    setSuccessMessage(null);
+    try {
+      const headers = await getAuthHeaders();
+      const res = await fetch(`/api/admin/users?inviteId=${encodeURIComponent(inviteId)}`, {
+        method: "DELETE",
+        headers,
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed to revoke invite");
+      setSuccessMessage("Invitation was revoked.");
+      setTimeout(() => setSuccessMessage(null), 5000);
+      await fetchAdmins();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to revoke invite");
+    } finally {
+      setRevokingInviteId(null);
+    }
+  };
+
+  const startEdit = (a: AdminUser, scrollToRow = false) => {
     setEditingUid(a.uid);
     setEditEmail(a.email);
     setEditPassword("");
+    if (scrollToRow) {
+      setTimeout(() => editingRowRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }), 100);
+    }
   };
 
   const isCurrentUser = (uid: string) => user?.uid === uid;
+
+  const formatDate = (iso: string) => {
+    if (!iso) return "—";
+    try {
+      const d = new Date(iso);
+      return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+    } catch {
+      return iso;
+    }
+  };
 
   return (
     <div>
@@ -207,6 +256,65 @@ export default function AdminUsersManager() {
         )}
       </div>
 
+      {invites.length > 0 && (
+        <div className="mb-8">
+          <h3 className="font-neue-kabel font-bold text-lg mb-3">Invitations Sent</h3>
+          <div className="overflow-x-auto border border-gray-200 rounded-lg">
+            <table className="w-full text-left">
+              <thead>
+                <tr className="border-b border-gray-200 bg-gray-50">
+                  <th className="py-3 px-4 font-helvetica font-bold">Email</th>
+                  <th className="py-3 px-4 font-helvetica font-bold">Date Emailed</th>
+                  <th className="py-3 px-4 font-helvetica font-bold">Date Accepted</th>
+                  <th className="py-3 px-4 font-helvetica font-bold w-32">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {invites.map((inv) => (
+                  <tr key={inv.id} className="border-b border-gray-100">
+                    <td className="py-3 px-4 font-helvetica">{inv.email}</td>
+                    <td className="py-3 px-4 font-helvetica text-sm text-gray-600">{formatDate(inv.dateEmailed)}</td>
+                    <td className="py-3 px-4 font-helvetica text-sm text-gray-600">
+                      {inv.dateAccepted
+                        ? formatDate(inv.dateAccepted)
+                        : inv.dateRevoked
+                          ? `Revoked ${formatDate(inv.dateRevoked)}`
+                          : "Pending"}
+                    </td>
+                    <td className="py-3 px-4">
+                      {inv.acceptedUid ? (
+                        <button
+                          onClick={() => {
+                            const admin = admins.find((a) => a.uid === inv.acceptedUid);
+                            if (admin) startEdit(admin, true);
+                          }}
+                          className="text-[var(--primary)] hover:text-[var(--primary-dark)] font-helvetica text-sm flex items-center gap-1"
+                        >
+                          <Pencil size={14} />
+                          Edit
+                        </button>
+                      ) : inv.dateRevoked ? (
+                        <span className="text-gray-400 font-helvetica text-sm">—</span>
+                      ) : (
+                        <button
+                          onClick={() => handleRevokeInvite(inv.id)}
+                          disabled={revokingInviteId === inv.id}
+                          className="text-red-600 hover:text-red-800 font-helvetica text-sm flex items-center gap-1 disabled:opacity-50"
+                        >
+                          <Trash2 size={14} />
+                          {revokingInviteId === inv.id ? "Revoking..." : "Revoke"}
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      <h3 className="font-neue-kabel font-bold text-lg mb-3">Current Admins</h3>
       {loading ? (
         <div className="py-8 text-center text-gray-500">Loading...</div>
       ) : admins.length === 0 ? (
@@ -222,7 +330,11 @@ export default function AdminUsersManager() {
             </thead>
             <tbody>
               {admins.map((a) => (
-                <tr key={a.uid} className="border-b border-gray-100">
+                <tr
+                  key={a.uid}
+                  ref={editingUid === a.uid ? editingRowRef : null}
+                  className="border-b border-gray-100"
+                >
                   <td className="py-3 font-helvetica">
                     {editingUid === a.uid ? (
                       <form onSubmit={handleEdit} className="flex flex-wrap gap-2 items-center">

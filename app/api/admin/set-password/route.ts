@@ -34,9 +34,14 @@ export async function POST(request: Request) {
     const invite = inviteDoc.data();
     const email = invite?.email as string | undefined;
     const expiresAt = invite?.expiresAt;
+    const revokedAt = invite?.revokedAt;
 
     if (!email) {
       return NextResponse.json({ error: "Invalid invite" }, { status: 400 });
+    }
+
+    if (revokedAt) {
+      return NextResponse.json({ error: "This invite was revoked" }, { status: 400 });
     }
 
     const now = new Date();
@@ -48,7 +53,10 @@ export async function POST(request: Request) {
 
     const userRecord = await auth.createUser({ email, password });
     await db.collection("admins").doc(userRecord.uid).set({ email });
-    await inviteDoc.ref.delete();
+    await inviteDoc.ref.update({
+      acceptedAt: new Date(),
+      acceptedUid: userRecord.uid,
+    });
 
     return NextResponse.json({ success: true });
   } catch (err) {
