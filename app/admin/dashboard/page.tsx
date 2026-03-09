@@ -12,9 +12,10 @@ import ComingSoonCardsManager from "@/components/admin/ComingSoonCardsManager";
 import ContactMessagesManager from "@/components/admin/ContactMessagesManager";
 import AdminUsersManager from "@/components/admin/AdminUsersManager";
 import AdminLogViewer from "@/components/admin/AdminLogViewer";
-import { Mail, Users, Briefcase, LogOut, UsersRound, BookOpen, MessageSquareQuote, MessageCircle, Shield, ScrollText } from "lucide-react";
+import SocialMediaManager from "@/components/admin/SocialMediaManager";
+import { Mail, Users, Briefcase, LogOut, UsersRound, BookOpen, MessageSquareQuote, MessageCircle, Shield, ScrollText, Share2 } from "lucide-react";
 
-type Tab = "newsletter" | "applications" | "positions" | "testimonials" | "board" | "comingSoon" | "contactMessages" | "adminUsers" | "adminLog";
+type Tab = "newsletter" | "applications" | "positions" | "testimonials" | "board" | "comingSoon" | "contactMessages" | "socialMedia" | "adminUsers" | "adminLog";
 
 export default function AdminDashboardPage() {
   const { user, isAdmin, loading, logout } = useAdminAuth();
@@ -56,6 +57,7 @@ export default function AdminDashboardPage() {
     { id: "testimonials", label: "Volunteer Testimonials", icon: <MessageSquareQuote size={18} /> },
     { id: "board", label: "Board of Directors", icon: <UsersRound size={18} /> },
     { id: "comingSoon", label: "Coming Soon Cards", icon: <BookOpen size={18} /> },
+    { id: "socialMedia", label: "Social Media", icon: <Share2 size={18} /> },
     { id: "adminUsers", label: "Admin Users", icon: <Shield size={18} /> },
     { id: "adminLog", label: "Activity Log", icon: <ScrollText size={18} /> },
   ];
@@ -98,6 +100,7 @@ export default function AdminDashboardPage() {
         {activeTab === "testimonials" && <VolunteerTestimonialsManager />}
         {activeTab === "board" && <BoardOfDirectorsManager />}
         {activeTab === "comingSoon" && <ComingSoonCardsManager />}
+        {activeTab === "socialMedia" && <SocialMediaManager />}
         {activeTab === "adminUsers" && <AdminUsersManager />}
         {activeTab === "adminLog" && <AdminLogViewer />}
       </div>

@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import Layout from "@/components/common/Layout";
 import VolunteerHero from "@/components/volunteer/VolunteerHero";
 import VolunteerImpact from "@/components/volunteer/VolunteerImpact";
@@ -40,7 +41,9 @@ export default function Volunteer() {
       <VolunteerHero />
       <VolunteerImpact />
       <VolunteerOpportunities />
-      <ApplicationForm />
+      <Suspense fallback={<div className="py-16 md:py-24 bg-white" />}>
+        <ApplicationForm />
+      </Suspense>
       <NewsletterSection />
     </Layout>
   );

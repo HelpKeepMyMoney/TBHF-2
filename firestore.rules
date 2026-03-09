@@ -65,5 +65,11 @@ service cloud.firestore {
       allow read, create: if request.auth != null && isAdmin();
       allow update, delete: if false;
     }
+
+    // Site config (social links, etc.): anyone can read, only admins can write
+    match /siteConfig/{docId} {
+      allow read: if true;
+      allow create, update, delete: if request.auth != null && isAdmin();
+    }
   }
 }

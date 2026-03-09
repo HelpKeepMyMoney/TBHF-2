@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   collection,
   getDocs,
@@ -9,37 +9,25 @@ import {
   deleteDoc,
   query,
   orderBy,
+  Timestamp,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAdminAuth } from "@/context/AdminAuthContext";
 import { logAdminAction } from "@/lib/adminLog";
-
-interface VolunteerApplication {
-  id: string;
-  name: string;
-  email: string;
-  phone: string;
-  city: string;
-  state: string;
-  interests: string[];
-  experience: string;
-  availability: string;
-  motivation: string;
-  referral: string;
-  submittedAt: { seconds: number } | null;
-  status: string;
-}
-
-const STATUS_OPTIONS = ["pending", "reviewed", "contacted", "closed"];
+import type { VolunteerApplication } from "@/lib/types/volunteer";
+import { RECRUITMENT_STATUS_OPTIONS } from "@/lib/types/volunteer";
 
 export default function VolunteerApplicationsManager() {
   const { user } = useAdminAuth();
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [applications, setApplications] = useState<VolunteerApplication[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [positionFilter, setPositionFilter] = useState<string>("all");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [uploadingResume, setUploadingResume] = useState(false);
   const [formState, setFormState] = useState<Partial<VolunteerApplication>>({});
 
   const fetchApplications = async () => {
@@ -107,13 +95,68 @@ export default function VolunteerApplicationsManager() {
       motivation: a.motivation,
       referral: a.referral,
       status: a.status,
+      interviewScheduledAt: a.interviewScheduledAt,
+      interviewNotes: a.interviewNotes,
+      onboardingStatus: a.onboardingStatus ?? "not_started",
+      onboardingNotes: a.onboardingNotes,
     });
+  };
+
+  const handleResumeUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !selectedId || !user) return;
+    setUploadingResume(true);
+    try {
+      const token = await user.getIdToken();
+      const formData = new FormData();
+      formData.append("applicationId", selectedId);
+      formData.append("file", file);
+      const res = await fetch("/api/volunteer/upload-resume", {
+        method: "POST",
+        headers: { Authorization: token ? `Bearer ${token}` : "" },
+        body: formData,
+      });
+      const data = await res.json();
+      if (res.ok && data.resumeUrl) {
+        setApplications((prev) =>
+          prev.map((a) =>
+            a.id === selectedId
+              ? {
+                  ...a,
+                  resumeUrl: data.resumeUrl,
+                  resumeFileName: data.resumeFileName,
+                  resumeUploadedAt: { seconds: Math.floor(Date.now() / 1000) },
+                }
+              : a
+          )
+        );
+      } else {
+        alert(data.details || data.error || "Upload failed");
+      }
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Upload failed");
+    } finally {
+      setUploadingResume(false);
+      e.target.value = "";
+    }
   };
 
   const handleSave = async () => {
     if (!editingId || !db) return;
     setSaving(true);
     try {
+      const interviewDt =
+        typeof formState.interviewScheduledAt === "string" &&
+        formState.interviewScheduledAt
+          ? new Date(formState.interviewScheduledAt)
+          : formState.interviewScheduledAt &&
+              typeof formState.interviewScheduledAt === "object" &&
+              "seconds" in formState.interviewScheduledAt
+            ? new Date((formState.interviewScheduledAt as { seconds: number }).seconds * 1000)
+            : null;
+      const interviewTimestamp = interviewDt
+        ? Timestamp.fromDate(interviewDt)
+        : null;
       const payload = {
         name: formState.name,
         email: formState.email,
@@ -126,10 +169,27 @@ export default function VolunteerApplicationsManager() {
         motivation: formState.motivation ?? "",
         referral: formState.referral ?? "",
         status: formState.status ?? "pending",
+        interviewScheduledAt: interviewTimestamp,
+        interviewNotes: formState.interviewNotes ?? "",
+        onboardingStatus: formState.onboardingStatus ?? "not_started",
+        onboardingNotes: formState.onboardingNotes ?? "",
       };
+      if (formState.onboardingStatus === "completed") {
+        (payload as Record<string, unknown>).onboardingCompletedAt = new Date();
+      }
       await updateDoc(doc(db, "volunteerApplications", editingId), payload);
       setApplications((prev) =>
-        prev.map((a) => (a.id === editingId ? { ...a, ...payload } : a))
+        prev.map((a) =>
+          a.id === editingId
+            ? {
+                ...a,
+                ...payload,
+                interviewScheduledAt: interviewTimestamp
+                  ? { seconds: interviewTimestamp.seconds }
+                  : null,
+              }
+            : a
+        )
       );
       setEditingId(null);
       if (user) {
@@ -170,12 +230,28 @@ export default function VolunteerApplicationsManager() {
     }
   };
 
-  const filteredApplications =
-    statusFilter === "all"
-      ? applications
-      : applications.filter((a) => a.status === statusFilter);
+  const positionTitles = [...new Set(applications.map((a) => a.positionTitle).filter(Boolean))] as string[];
+  const filteredApplications = applications.filter((a) => {
+    if (statusFilter !== "all" && a.status !== statusFilter) return false;
+    if (positionFilter !== "all" && a.positionTitle !== positionFilter) return false;
+    return true;
+  });
 
   const selected = applications.find((a) => a.id === selectedId);
+
+  const INTEREST_LABELS: Record<string, string> = {
+    research: "Research & Archiving",
+    education: "Education & Curriculum",
+    outreach: "Community Outreach",
+    events: "Events & Fundraising",
+    digital: "Digital Content Creation",
+    tech: "Technology & Development",
+  };
+  const formatInterests = (ids: string[] | undefined) =>
+    (ids ?? [])
+      .map((id) => INTEREST_LABELS[id] || id)
+      .filter(Boolean)
+      .join(", ") || "-";
 
   return (
     <div>
@@ -190,9 +266,21 @@ export default function VolunteerApplicationsManager() {
           className="px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
         >
           <option value="all">All statuses</option>
-          {STATUS_OPTIONS.map((s) => (
+          {RECRUITMENT_STATUS_OPTIONS.map((s) => (
             <option key={s} value={s}>
-              {s.charAt(0).toUpperCase() + s.slice(1)}
+              {s.charAt(0).toUpperCase() + s.slice(1).replace(/_/g, " ")}
+            </option>
+          ))}
+        </select>
+        <select
+          value={positionFilter}
+          onChange={(e) => setPositionFilter(e.target.value)}
+          className="px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+        >
+          <option value="all">All positions</option>
+          {positionTitles.map((t) => (
+            <option key={t} value={t}>
+              {t}
             </option>
           ))}
         </select>
@@ -207,6 +295,7 @@ export default function VolunteerApplicationsManager() {
               <thead>
                 <tr className="border-b border-gray-200">
                   <th className="py-3 font-helvetica font-bold">Name</th>
+                  <th className="py-3 font-helvetica font-bold">Position</th>
                   <th className="py-3 font-helvetica font-bold">Status</th>
                   <th className="py-3 font-helvetica font-bold">Date</th>
                   <th className="py-3 font-helvetica font-bold w-24">Actions</th>
@@ -222,6 +311,9 @@ export default function VolunteerApplicationsManager() {
                     onClick={() => setSelectedId(a.id)}
                   >
                     <td className="py-3 font-helvetica">{a.name}</td>
+                    <td className="py-3 font-helvetica text-sm text-gray-600">
+                      {a.positionTitle || "-"}
+                    </td>
                     <td className="py-3">
                       <select
                         value={a.status}
@@ -232,7 +324,7 @@ export default function VolunteerApplicationsManager() {
                         onClick={(e) => e.stopPropagation()}
                         className="text-sm border border-gray-300 rounded px-2 py-1"
                       >
-                        {STATUS_OPTIONS.map((s) => (
+                        {RECRUITMENT_STATUS_OPTIONS.map((s) => (
                           <option key={s} value={s}>
                             {s}
                           </option>
@@ -266,9 +358,44 @@ export default function VolunteerApplicationsManager() {
             </table>
           </div>
 
-          <div className="border border-gray-200 rounded-lg p-6 bg-gray-50">
+          <div className="border border-gray-200 rounded-lg p-6 bg-gray-50 max-h-[calc(100vh-16rem)] overflow-y-auto">
             {selected ? (
-              editingId === selected.id ? (
+              <>
+                <div className="mb-4 pb-4 border-b border-gray-200">
+                  <label className="block font-helvetica font-bold mb-2 text-sm">
+                    Resume
+                  </label>
+                  {selected.resumeUrl ? (
+                    <div className="flex items-center gap-2">
+                      <a
+                        href={selected.resumeUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="font-helvetica text-sm text-[var(--primary)] hover:underline"
+                      >
+                        {selected.resumeFileName || "View resume"}
+                      </a>
+                    </div>
+                  ) : (
+                    <p className="text-sm text-gray-500 mb-2">No resume uploaded</p>
+                  )}
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                    onChange={handleResumeUpload}
+                    className="hidden"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={uploadingResume}
+                    className="px-3 py-1.5 text-sm bg-gray-200 text-gray-700 font-helvetica font-bold rounded-md hover:bg-gray-300 disabled:opacity-50"
+                  >
+                    {uploadingResume ? "Uploading..." : "Upload resume"}
+                  </button>
+                </div>
+              {editingId === selected.id ? (
                 <div className="space-y-4">
                   <h3 className="font-neue-kabel font-bold text-lg">
                     Edit Application
@@ -430,12 +557,84 @@ export default function VolunteerApplicationsManager() {
                         }
                         className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
                       >
-                        {STATUS_OPTIONS.map((s) => (
+                        {RECRUITMENT_STATUS_OPTIONS.map((s) => (
                           <option key={s} value={s}>
-                            {s}
+                            {s.replace(/_/g, " ")}
                           </option>
                         ))}
                       </select>
+                    </div>
+                    <div>
+                      <label className="block font-helvetica font-bold mb-1 text-sm">
+                        Interview scheduled
+                      </label>
+                      <input
+                        type="datetime-local"
+                        value={(() => {
+                          const v = formState.interviewScheduledAt;
+                          if (!v) return "";
+                          if (typeof v === "object" && "seconds" in v) {
+                            const d = new Date((v as { seconds: number }).seconds * 1000);
+                            const pad = (n: number) => String(n).padStart(2, "0");
+                            return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+                          }
+                          return typeof v === "string" ? v : "";
+                        })()}
+                        onChange={(e) =>
+                          setFormState((p) => ({
+                            ...p,
+                            interviewScheduledAt: e.target.value
+                              ? ({ seconds: new Date(e.target.value).getTime() / 1000 } as { seconds: number })
+                              : undefined,
+                          }))
+                        }
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block font-helvetica font-bold mb-1 text-sm">
+                        Interview notes
+                      </label>
+                      <textarea
+                        value={formState.interviewNotes ?? ""}
+                        onChange={(e) =>
+                          setFormState((p) => ({ ...p, interviewNotes: e.target.value }))
+                        }
+                        rows={2}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block font-helvetica font-bold mb-1 text-sm">
+                        Onboarding status
+                      </label>
+                      <select
+                        value={formState.onboardingStatus ?? "not_started"}
+                        onChange={(e) =>
+                          setFormState((p) => ({
+                            ...p,
+                            onboardingStatus: e.target.value as "not_started" | "in_progress" | "completed",
+                          }))
+                        }
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
+                      >
+                        <option value="not_started">Not started</option>
+                        <option value="in_progress">In progress</option>
+                        <option value="completed">Completed</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block font-helvetica font-bold mb-1 text-sm">
+                        Onboarding notes
+                      </label>
+                      <textarea
+                        value={formState.onboardingNotes ?? ""}
+                        onChange={(e) =>
+                          setFormState((p) => ({ ...p, onboardingNotes: e.target.value }))
+                        }
+                        rows={2}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
+                      />
                     </div>
                   </div>
                   <div className="flex gap-2 pt-2">
@@ -476,18 +675,35 @@ export default function VolunteerApplicationsManager() {
                     </div>
                   </div>
                   <p className="font-helvetica text-sm">
-                    <span className="font-bold">Email:</span> {selected.email}
+                    <span className="font-bold">Submitted:</span>{" "}
+                    {selected.submittedAt &&
+                    typeof selected.submittedAt === "object" &&
+                    "seconds" in selected.submittedAt
+                      ? new Date(selected.submittedAt.seconds * 1000).toLocaleString()
+                      : "-"}
+                  </p>
+                  <p className="font-helvetica text-sm">
+                    <span className="font-bold">Name:</span> {selected.name || "-"}
+                  </p>
+                  <p className="font-helvetica text-sm">
+                    <span className="font-bold">Email:</span> {selected.email || "-"}
                   </p>
                   <p className="font-helvetica text-sm">
                     <span className="font-bold">Phone:</span> {selected.phone || "-"}
                   </p>
                   <p className="font-helvetica text-sm">
-                    <span className="font-bold">Location:</span> {selected.city},{" "}
-                    {selected.state}
+                    <span className="font-bold">City:</span> {selected.city || "-"}
+                  </p>
+                  <p className="font-helvetica text-sm">
+                    <span className="font-bold">State:</span> {selected.state || "-"}
+                  </p>
+                  <p className="font-helvetica text-sm">
+                    <span className="font-bold">Position:</span>{" "}
+                    {selected.positionTitle || "-"}
                   </p>
                   <p className="font-helvetica text-sm">
                     <span className="font-bold">Interests:</span>{" "}
-                    {selected.interests?.join(", ") || "-"}
+                    {formatInterests(selected.interests)}
                   </p>
                   <p className="font-helvetica text-sm">
                     <span className="font-bold">Availability:</span>{" "}
@@ -505,8 +721,37 @@ export default function VolunteerApplicationsManager() {
                     <span className="font-bold">Referral:</span>{" "}
                     {selected.referral || "-"}
                   </p>
+                  <p className="font-helvetica text-sm">
+                    <span className="font-bold">Status:</span>{" "}
+                    <span className="capitalize">
+                      {(selected.status || "pending").replace(/_/g, " ")}
+                    </span>
+                  </p>
+                  <p className="font-helvetica text-sm">
+                    <span className="font-bold">Interview scheduled:</span>{" "}
+                    {selected.interviewScheduledAt &&
+                    typeof selected.interviewScheduledAt === "object" &&
+                    "seconds" in selected.interviewScheduledAt
+                      ? new Date(
+                          selected.interviewScheduledAt.seconds * 1000
+                        ).toLocaleString()
+                      : "-"}
+                  </p>
+                  <p className="font-helvetica text-sm">
+                    <span className="font-bold">Interview notes:</span>{" "}
+                    {selected.interviewNotes || "-"}
+                  </p>
+                  <p className="font-helvetica text-sm">
+                    <span className="font-bold">Onboarding status:</span>{" "}
+                    {(selected.onboardingStatus ?? "not_started").replace(/_/g, " ")}
+                  </p>
+                  <p className="font-helvetica text-sm">
+                    <span className="font-bold">Onboarding notes:</span>{" "}
+                    {selected.onboardingNotes || "-"}
+                  </p>
                 </div>
-              )
+              )}
+              </>
             ) : (
               <p className="text-gray-500 font-helvetica">
                 Select an application to view details.

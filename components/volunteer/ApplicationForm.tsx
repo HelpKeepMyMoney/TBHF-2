@@ -1,30 +1,86 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { useInView } from "react-intersection-observer";
 import Link from "next/link";
-import { collection, addDoc, serverTimestamp } from "firebase/firestore";
+import { useSearchParams } from "next/navigation";
+import { collection, addDoc, getDocs, query, orderBy, serverTimestamp } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import { DEFAULT_VOLUNTEER_POSITIONS } from "@/lib/volunteer-positions";
+import type { VolunteerPosition } from "@/lib/types/volunteer";
 
 const ApplicationForm = () => {
+  const searchParams = useSearchParams();
   const [ref, inView] = useInView({
     triggerOnce: true,
     threshold: 0.1,
   });
 
+  const [positions, setPositions] = useState<(VolunteerPosition & { id: string })[]>([]);
+  const [positionsLoading, setPositionsLoading] = useState(true);
   const [formState, setFormState] = useState({
     name: "",
     email: "",
     phone: "",
     city: "",
     state: "",
-    interests: [],
+    interests: [] as string[],
     experience: "",
     availability: "",
     motivation: "",
     referral: "",
+    positionId: "",
+    positionTitle: "",
   });
+
+  useEffect(() => {
+    const fetchPositions = async () => {
+      if (!db) {
+        setPositions(
+          DEFAULT_VOLUNTEER_POSITIONS.map((p, i) => ({
+            id: `default-${i}`,
+            ...p,
+            order: p.order ?? i,
+          })) as (VolunteerPosition & { id: string })[]
+        );
+        setPositionsLoading(false);
+        return;
+      }
+      try {
+        const q = query(
+          collection(db, "volunteerPositions"),
+          orderBy("order", "asc")
+        );
+        const snapshot = await getDocs(q);
+        const allData = snapshot.docs.map((docSnap) => ({
+          id: docSnap.id,
+          ...docSnap.data(),
+        })) as (VolunteerPosition & { id: string })[];
+        const data = allData.filter((p) => p.published !== false);
+        setPositions(data.length > 0 ? data : DEFAULT_VOLUNTEER_POSITIONS.map((p, i) => ({ id: `default-${i}`, ...p, order: p.order ?? i })) as (VolunteerPosition & { id: string })[]);
+      } catch {
+        setPositions(DEFAULT_VOLUNTEER_POSITIONS.map((p, i) => ({ id: `default-${i}`, ...p, order: p.order ?? i })) as (VolunteerPosition & { id: string })[]);
+      } finally {
+        setPositionsLoading(false);
+      }
+    };
+    fetchPositions();
+  }, []);
+
+  useEffect(() => {
+    const positionId = searchParams.get("position");
+    if (positionId && positions.length > 0) {
+      const pos = positions.find((p) => p.id === positionId);
+      if (pos) {
+        setFormState((prev) => ({
+          ...prev,
+          positionId: pos.id ?? "",
+          positionTitle: pos.title ?? "",
+        }));
+      }
+    }
+  }, [searchParams, positions]);
 
   const [submitted, setSubmitted] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -90,8 +146,11 @@ const ApplicationForm = () => {
     }
 
     try {
+      const { positionId, positionTitle, ...rest } = formState;
       await addDoc(collection(db, "volunteerApplications"), {
-        ...formState,
+        ...rest,
+        positionId: positionId || undefined,
+        positionTitle: positionTitle || undefined,
         submittedAt: serverTimestamp(),
         status: "pending",
       });
@@ -278,6 +337,40 @@ const ApplicationForm = () => {
                       </div>
                     ))}
                   </div>
+                </div>
+
+                <div className="mb-6">
+                  <label
+                    htmlFor="position"
+                    className="block font-helvetica font-bold mb-2"
+                  >
+                    Position applying for
+                  </label>
+                  <select
+                    id="position"
+                    name="position"
+                    value={formState.positionId}
+                    onChange={(e) => {
+                      const id = e.target.value;
+                      const pos = positions.find((p) => p.id === id);
+                      setFormState((prev) => ({
+                        ...prev,
+                        positionId: id,
+                        positionTitle: pos?.title ?? "",
+                      }));
+                    }}
+                    disabled={positionsLoading}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+                  >
+                    <option value="">General interest</option>
+                    {positions
+                      .filter((p) => !String(p.id).startsWith("default-"))
+                      .map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.title}
+                        </option>
+                      ))}
+                  </select>
                 </div>
 
                 <div className="mb-6">

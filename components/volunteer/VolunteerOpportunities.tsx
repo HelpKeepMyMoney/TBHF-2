@@ -22,6 +22,7 @@ export interface VolunteerPosition {
   location: string;
   category: string;
   order?: number;
+  published?: boolean;
 }
 
 const VolunteerOpportunities = () => {
@@ -50,10 +51,11 @@ const VolunteerOpportunities = () => {
         const positionsRef = collection(db, "volunteerPositions");
         const q = query(positionsRef, orderBy("order", "asc"));
         const snapshot = await getDocs(q);
-        const positions: VolunteerPosition[] = snapshot.docs.map((doc) => ({
+        const allPositions: VolunteerPosition[] = snapshot.docs.map((doc) => ({
           id: doc.id,
           ...(doc.data() as Omit<VolunteerPosition, "id">),
         }));
+        const positions = allPositions.filter((p) => p.published !== false);
         if (positions.length > 0) {
           setOpportunities(positions);
         } else {

@@ -23,6 +23,8 @@ export type VolunteerFormData = {
   availability: string;
   motivation: string;
   referral?: string;
+  positionId?: string;
+  positionTitle?: string;
 };
 
 function formatInterests(interests: string[]): string {
@@ -46,6 +48,7 @@ export async function POST(request: Request) {
       availability,
       motivation,
       referral,
+      positionTitle,
     } = body;
 
     const adminEmails = (process.env.ADMIN_EMAIL || "")
@@ -101,6 +104,7 @@ export async function POST(request: Request) {
     <p><strong>Email:</strong> ${email}</p>
     <p><strong>Phone:</strong> ${phone || "Not provided"}</p>
     <p><strong>Location:</strong> ${city}, ${state}</p>
+    ${positionTitle ? `<p><strong>Position:</strong> ${positionTitle}</p>` : ""}
     <p><strong>Areas of Interest:</strong> ${interestsLabel}</p>
     <p><strong>Availability:</strong> ${availability}</p>
     ${referral ? `<p><strong>How they heard about us:</strong> ${referral}</p>` : ""}
