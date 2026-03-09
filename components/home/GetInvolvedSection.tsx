@@ -53,10 +53,11 @@ const GetInvolvedSection = () => {
         const positionsRef = collection(db, "volunteerPositions");
         const q = query(positionsRef, orderBy("order", "asc"));
         const snapshot = await getDocs(q);
-        const positions = snapshot.docs.map((doc) => ({
+        const allPositions = snapshot.docs.map((doc) => ({
           id: doc.id,
           ...doc.data(),
-        })) as { title: string; description: string; category: string; commitment?: string }[];
+        })) as { title: string; description: string; category: string; commitment?: string; published?: boolean }[];
+        const positions = allPositions.filter((p) => p.published !== false);
         const display = (positions.length > 0 ? positions : DEFAULT_VOLUNTEER_POSITIONS)
           .slice(0, 4)
           .map((p) => ({
